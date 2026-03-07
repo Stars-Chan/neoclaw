@@ -19,33 +19,10 @@ import type {
   ReplyFn,
   StreamHandler,
 } from './gateway/types.js';
+import { Mutex } from './utils/mutex.js';
 import { logger } from './utils/logger.js';
 
 const log = logger('dispatcher');
-
-// ── Serial queue: per-conversation FIFO lock ──────────────────
-
-class SerialQueue {
-  private _pending: Array<() => void> = [];
-  private _busy = false;
-
-  async acquire(): Promise<void> {
-    if (!this._busy) {
-      this._busy = true;
-      return;
-    }
-    return new Promise<void>((resolve) => this._pending.push(resolve));
-  }
-
-  release(): void {
-    const next = this._pending.shift();
-    if (next) {
-      next();
-    } else {
-      this._busy = false;
-    }
-  }
-}
 
 // ── Dispatcher ────────────────────────────────────────────────
 
@@ -57,7 +34,7 @@ export class Dispatcher {
   private _defaultAgentKind = 'claude_code';
   private _gateways: Gateway[] = [];
   /** Per-conversation serial queues to prevent concurrent handling. */
-  private _queues = new Map<string, SerialQueue>();
+  private _queues = new Map<string, Mutex>();
   private _workspacesDir: string | null = null;
   private _onRestart: RestartCallback | null = null;
 
@@ -97,45 +74,44 @@ export class Dispatcher {
     const queue = this._getQueue(key);
     await queue.acquire();
     try {
+      let responseText = '';
+
       // Slash commands are always non-streaming
       const command = this._tryParseCommand(msg.text);
       if (command) {
         const response = await this._execCommand(command, msg, key);
-        this._appendHistory(key, 'user', msg.text);
-        this._appendHistory(key, 'neoclaw', response.text);
+        responseText = response.text;
         await reply(response);
-        return;
-      }
-
-      const agent = this._getAgent();
-      const request: RunRequest = {
-        text: msg.text,
-        conversationId: key,
-        chatId: msg.chatId,
-        gatewayKind: msg.gatewayKind,
-        attachments: msg.attachments,
-      };
-
-      if (streamHandler && agent.stream) {
-        // Streaming path: gateway renders content progressively
-        let finalText = '';
-        const agentStream = agent.stream(request);
-        async function* tracked(): AsyncGenerator<AgentStreamEvent> {
-          for await (const event of agentStream) {
-            if (event.type === 'done') finalText = event.response.text;
-            yield event;
-          }
-        }
-        await streamHandler(tracked());
-        this._appendHistory(key, 'user', msg.text);
-        this._appendHistory(key, 'neoclaw', finalText);
       } else {
-        // Non-streaming fallback
-        const response = await agent.run(request);
-        this._appendHistory(key, 'user', msg.text);
-        this._appendHistory(key, 'neoclaw', response.text);
-        await reply(response);
+        const agent = this._getAgent();
+        const request: RunRequest = {
+          text: msg.text,
+          conversationId: key,
+          chatId: msg.chatId,
+          gatewayKind: msg.gatewayKind,
+          attachments: msg.attachments,
+        };
+
+        if (streamHandler && agent.stream) {
+          // Streaming path: gateway renders content progressively
+          const agentStream = agent.stream(request);
+          async function* tracked(): AsyncGenerator<AgentStreamEvent> {
+            for await (const event of agentStream) {
+              if (event.type === 'done') responseText = event.response.text;
+              yield event;
+            }
+          }
+          await streamHandler(tracked());
+        } else {
+          // Non-streaming fallback
+          const response = await agent.run(request);
+          responseText = response.text;
+          await reply(response);
+        }
       }
+
+      this._appendHistory(key, 'user', msg.text);
+      this._appendHistory(key, 'neoclaw', responseText);
     } finally {
       queue.release();
     }
@@ -177,10 +153,10 @@ export class Dispatcher {
     return msg.chatId;
   }
 
-  private _getQueue(key: string): SerialQueue {
+  private _getQueue(key: string): Mutex {
     let q = this._queues.get(key);
     if (!q) {
-      q = new SerialQueue();
+      q = new Mutex();
       this._queues.set(key, q);
     }
     return q;

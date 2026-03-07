@@ -437,7 +437,7 @@ export class FeishuGateway implements Gateway {
 
 /** Parse a conversationId of the form "chatId" or "chatId:thread:threadId". */
 function parseConvId(convId: string): { chatId: string; threadRootId?: string } {
-  const sep = ':thread:';
+  const sep = '_thread_';
   const idx = convId.indexOf(sep);
   if (idx >= 0) {
     return { chatId: convId.slice(0, idx), threadRootId: convId.slice(idx + sep.length) };

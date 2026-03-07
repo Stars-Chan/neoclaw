@@ -74,16 +74,15 @@ export function buildCard(opts: {
 
 // ── Send helpers ──────────────────────────────────────────────
 
-/** Send an interactive card to a chat or as a reply. */
-export async function sendCard(
+/** Send a message (reply or create) with given msg_type and content string. */
+async function sendMessage(
   client: Lark.Client,
   target: string,
-  card: Record<string, unknown>,
+  msgType: string,
+  content: string,
   opts?: { replyToMessageId?: string }
 ): Promise<SendResult> {
-  const content = JSON.stringify(card);
   const receiveId = target.trim();
-  log.info(`Sending card to ${target}: ${content.slice(0, 200)}…`);
 
   let res: Record<string, unknown>;
   if (opts?.replyToMessageId) {
@@ -100,7 +99,7 @@ export async function sendCard(
       }
     ).im.message.reply({
       path: { message_id: opts.replyToMessageId },
-      data: { msg_type: 'interactive', content },
+      data: { msg_type: msgType, content },
     });
   } else {
     res = await (
@@ -116,7 +115,7 @@ export async function sendCard(
       }
     ).im.message.create({
       params: { receive_id_type: idType(receiveId) },
-      data: { receive_id: receiveId, msg_type: 'interactive', content },
+      data: { receive_id: receiveId, msg_type: msgType, content },
     });
   }
 
@@ -126,6 +125,18 @@ export async function sendCard(
   const messageId =
     ((res['data'] as Record<string, unknown>)?.['message_id'] as string) ?? 'unknown';
   return { messageId, chatId: receiveId };
+}
+
+/** Send an interactive card to a chat or as a reply. */
+export async function sendCard(
+  client: Lark.Client,
+  target: string,
+  card: Record<string, unknown>,
+  opts?: { replyToMessageId?: string }
+): Promise<SendResult> {
+  const content = JSON.stringify(card);
+  log.info(`Sending card to ${target}: ${content.slice(0, 200)}…`);
+  return sendMessage(client, target, 'interactive', content, opts);
 }
 
 // ── Streaming card (JSON 2.0, requires cardkit API) ───────────
@@ -217,51 +228,9 @@ export async function sendCardByRef(
   cardId: string,
   opts?: { replyToMessageId?: string }
 ): Promise<SendResult> {
-  const receiveId = target.trim();
   const content = JSON.stringify({ type: 'card', data: { card_id: cardId } });
   log.info(`Sending card ref ${cardId} to ${target}`);
-
-  let res: Record<string, unknown>;
-  if (opts?.replyToMessageId) {
-    res = await (
-      client as unknown as {
-        im: {
-          message: {
-            reply: (opts: {
-              path: { message_id: string };
-              data: { msg_type: string; content: string };
-            }) => Promise<Record<string, unknown>>;
-          };
-        };
-      }
-    ).im.message.reply({
-      path: { message_id: opts.replyToMessageId },
-      data: { msg_type: 'interactive', content },
-    });
-  } else {
-    res = await (
-      client as unknown as {
-        im: {
-          message: {
-            create: (opts: {
-              params: { receive_id_type: string };
-              data: { receive_id: string; msg_type: string; content: string };
-            }) => Promise<Record<string, unknown>>;
-          };
-        };
-      }
-    ).im.message.create({
-      params: { receive_id_type: idType(receiveId) },
-      data: { receive_id: receiveId, msg_type: 'interactive', content },
-    });
-  }
-
-  if (res['code'] !== 0) {
-    throw new Error(`Feishu send failed (code ${res['code']}): ${res['msg'] ?? ''}`);
-  }
-  const messageId =
-    ((res['data'] as Record<string, unknown>)?.['message_id'] as string) ?? 'unknown';
-  return { messageId, chatId: receiveId };
+  return sendMessage(client, target, 'interactive', content, opts);
 }
 
 /**

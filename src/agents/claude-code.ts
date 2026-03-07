@@ -21,6 +21,8 @@ import type {
   RunRequest,
   RunResponse,
 } from './types.js';
+import { Mutex } from '../utils/mutex.js';
+import { createDebouncedFlush } from '../utils/debounced-flush.js';
 import { logger } from '../utils/logger.js';
 
 const log = logger('claude-code');
@@ -164,30 +166,6 @@ function parseCliEvent(line: string): CueEvent | null {
   }
 }
 
-// ── Mutex for serializing stdin writes ───────────────────────
-
-class Mutex {
-  private _waiters: Array<() => void> = [];
-  private _held = false;
-
-  async lock(): Promise<void> {
-    if (!this._held) {
-      this._held = true;
-      return;
-    }
-    return new Promise<void>((resolve) => this._waiters.push(resolve));
-  }
-
-  unlock(): void {
-    const next = this._waiters.shift();
-    if (next) {
-      next();
-    } else {
-      this._held = false;
-    }
-  }
-}
-
 // ── ClaudeProcess: manages one long-running claude subprocess ──
 
 class ClaudeProcess {
@@ -273,7 +251,7 @@ class ClaudeProcess {
    * events until the result arrives.
    */
   async *exchange(text: string, attachments?: Attachment[]): AsyncGenerator<CueEvent> {
-    await this._mutex.lock();
+    await this._mutex.acquire();
     try {
       if (!this.isRunning) throw new Error('Process is not running');
 
@@ -305,7 +283,7 @@ class ClaudeProcess {
         yield evt;
       }
     } finally {
-      this._mutex.unlock();
+      this._mutex.release();
     }
   }
 
@@ -382,7 +360,16 @@ export class ClaudeCodeAgent implements Agent {
   /** Persists session IDs so processes can be resumed after idle reap or daemon restart. */
   private _sessionIds = new Map<string, string>();
   private _cleanupTimer: ReturnType<typeof setInterval> | null = null;
-  private _sessionFlushPending = false;
+  private _flushSessions = createDebouncedFlush(() => {
+    try {
+      const dir = join(homedir(), '.neoclaw', 'cache');
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const data: Record<string, string> = Object.fromEntries(this._sessionIds);
+      writeFileSync(SESSIONS_PATH, JSON.stringify(data, null, 2));
+    } catch (err) {
+      log.warn(`Failed to flush sessions: ${err}`);
+    }
+  }, 2000);
 
   constructor(
     private readonly opts: {
@@ -401,43 +388,17 @@ export class ClaudeCodeAgent implements Agent {
 
   async run(request: RunRequest): Promise<RunResponse> {
     log.info(`Run request: ${JSON.stringify(request)}`);
-    const t0 = Date.now();
-    const textParts: string[] = [];
-    const thinkingParts: string[] = [];
-    let resultEvt: ResultEvent | null = null;
-
-    for await (const evt of this._streamInternal(request)) {
-      if (evt.type === 'content_block_delta') {
-        const delta = (evt as ContentBlockDeltaEvent).delta;
-        if (delta.type === 'text_delta') textParts.push(delta.text);
-        else if (delta.type === 'thinking_delta') thinkingParts.push(delta.thinking);
-      } else if (evt.type === 'result') {
-        resultEvt = evt as ResultEvent;
-      }
+    let response: RunResponse | null = null;
+    let askQuestions: AskQuestion[] | null = null;
+    for await (const event of this.stream(request)) {
+      if (event.type === 'ask_questions') askQuestions = event.questions;
+      if (event.type === 'done') response = event.response;
     }
-
-    const baseText = resultEvt?.result || textParts.join('');
-    const askQuestions = resultEvt ? extractAskQuestions(resultEvt) : null;
-    // Non-streaming fallback: append questions as plain text
-    const text = askQuestions ? `${formatQuestionsAsText(askQuestions)}\n\n${baseText}` : baseText;
-    const thinking = thinkingParts.length > 0 ? thinkingParts.join('') : null;
-
-    // Persist session ID so the process can be resumed if it gets reaped while idle
-    if (resultEvt?.session_id) {
-      this._sessionIds.set(request.conversationId, resultEvt.session_id);
-      this._flushSessions();
+    if (!response) throw new Error('Stream ended without done event');
+    if (askQuestions) {
+      response = { ...response, text: `${formatQuestionsAsText(askQuestions)}\n\n${response.text}` };
     }
-
-    return {
-      text,
-      thinking,
-      sessionId: resultEvt?.session_id ?? null,
-      costUsd: resultEvt?.cost_usd ?? null,
-      inputTokens: resultEvt?.usage?.input_tokens ?? null,
-      outputTokens: resultEvt?.usage?.output_tokens ?? null,
-      elapsedMs: Date.now() - t0,
-      model: resultEvt?.model ?? null,
-    };
+    return response;
   }
 
   async *stream(request: RunRequest): AsyncGenerator<AgentStreamEvent> {
@@ -544,22 +505,6 @@ export class ClaudeCodeAgent implements Agent {
     } catch {
       // Non-critical — start with empty session map
     }
-  }
-
-  private _flushSessions(): void {
-    if (this._sessionFlushPending) return;
-    this._sessionFlushPending = true;
-    setTimeout(() => {
-      this._sessionFlushPending = false;
-      try {
-        const dir = join(homedir(), '.neoclaw', 'cache');
-        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        const data: Record<string, string> = Object.fromEntries(this._sessionIds);
-        writeFileSync(SESSIONS_PATH, JSON.stringify(data, null, 2));
-      } catch (err) {
-        log.warn(`Failed to flush sessions: ${err}`);
-      }
-    }, 2000);
   }
 
   // ── Internals ─────────────────────────────────────────────

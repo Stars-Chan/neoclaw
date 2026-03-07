@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { RawMessageEvent, MediaDownload, BotCredentials } from './client.js';
 import { getHttpClient } from './client.js';
+import { createDebouncedFlush } from '../../utils/debounced-flush.js';
 import { logger } from '../../utils/logger.js';
 
 const log = logger('feishu:receiver');
@@ -29,7 +30,6 @@ const DEDUP_PATH = join(homedir(), '.neoclaw', 'cache', 'feishu-dedup.json');
 
 const seenIds = new Map<string, number>();
 let lastCleanup = Date.now();
-let pendingFlush = false;
 
 function loadDedup(): void {
   try {
@@ -45,20 +45,15 @@ function loadDedup(): void {
   }
 }
 
-function flushDedup(): void {
-  if (pendingFlush) return;
-  pendingFlush = true;
-  setTimeout(() => {
-    pendingFlush = false;
-    try {
-      const dir = join(homedir(), '.neoclaw', 'cache');
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(DEDUP_PATH, JSON.stringify([...seenIds.entries()]));
-    } catch {
-      // Non-critical
-    }
-  }, 2000);
-}
+const flushDedup = createDebouncedFlush(() => {
+  try {
+    const dir = join(homedir(), '.neoclaw', 'cache');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(DEDUP_PATH, JSON.stringify([...seenIds.entries()]));
+  } catch {
+    // Non-critical
+  }
+}, 2000);
 
 /** Returns true if the message is new (and marks it as seen). */
 function markSeen(messageId: string): boolean {
@@ -87,49 +82,6 @@ function markSeen(messageId: string): boolean {
 
 // Initialize dedup cache on module load
 loadDedup();
-
-// ── Sender name cache ─────────────────────────────────────────
-
-const NAME_TTL_MS = 10 * 60 * 1000;
-const nameCache = new Map<string, { name: string; expiresAt: number }>();
-
-/// Lark (Feishu) resolveName OpenAPI needs permission application, leave it disabled for now.
-// async function resolveName(client: Lark.Client, openId: string): Promise<string | undefined> {
-//   if (!openId) return undefined;
-//   const cached = nameCache.get(openId);
-//   if (cached && cached.expiresAt > Date.now()) return cached.name;
-
-//   try {
-//     const res = await (
-//       client as unknown as {
-//         contact: {
-//           user: {
-//             get: (opts: {
-//               path: { user_id: string };
-//               params: { user_id_type: string };
-//             }) => Promise<Record<string, unknown>>;
-//           };
-//         };
-//       }
-//     ).contact.user.get({ path: { user_id: openId }, params: { user_id_type: 'open_id' } });
-//     log.info(`Resolved name for ${openId}: ${JSON.stringify(res)}`);
-
-//     const user = (res?.['data'] as Record<string, unknown>)?.['user'] as
-//       | Record<string, unknown>
-//       | undefined;
-//     const name = (user?.['name'] ??
-//       user?.['display_name'] ??
-//       user?.['en_name'] ??
-//       user?.['nickname']) as string | undefined;
-//     if (name) {
-//       nameCache.set(openId, { name, expiresAt: Date.now() + NAME_TTL_MS });
-//       return name;
-//     }
-//   } catch {
-//     // Best-effort
-//   }
-//   return undefined;
-// }
 
 // ── Content extraction ────────────────────────────────────────
 
@@ -401,9 +353,6 @@ export async function parseMessage(
       mentionedBot,
       attachments: [],
     };
-
-  // const senderName = await resolveName(client, senderOpenId);
-  // log.info(`Message ${msgId}: senderName=${senderName}`);
 
   const attachments = await fetchAttachments(
     client,
