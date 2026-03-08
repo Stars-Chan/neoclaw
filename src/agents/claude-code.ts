@@ -222,6 +222,7 @@ class ClaudeProcess {
       '--output-format',
       'stream-json',
       '--verbose',
+      '--disallowedTools "CronCreate CronDelete CronList"',
     ];
     if (this.opts.resumeSessionId) args.push('--resume', this.opts.resumeSessionId);
     if (this.opts.model) args.push('--model', this.opts.model);
