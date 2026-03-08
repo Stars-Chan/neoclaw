@@ -19,10 +19,10 @@ const REINDEX_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export const KNOWLEDGE_TOPICS = {
   'owner-profile': 'Owner personal info, background, career',
-  'preferences': 'Preferences, habits, tools, workflow',
-  'people': 'People and contacts',
-  'projects': 'Project notes, technical decisions',
-  'notes': 'General knowledge and miscellaneous',
+  preferences: 'Preferences, habits, tools, workflow',
+  people: 'People and contacts',
+  projects: 'Project notes, technical decisions',
+  notes: 'General knowledge and miscellaneous',
 } as const;
 
 export type KnowledgeTopic = keyof typeof KNOWLEDGE_TOPICS;
@@ -38,12 +38,20 @@ export class MemoryManager {
   // ── Tool handlers (return stringified results for the agent) ──
 
   async handleRead(input: unknown): Promise<string> {
+    log.debug(`handleRead: ${JSON.stringify(input, null, 2)}`);
+
     const { id } = input as { id: string };
-    if (!id) return 'Error: "id" is required.';
+    if (!id) {
+      log.warn('handleRead: "id" is required.');
+      return 'Error: "id" is required.';
+    }
 
     try {
       const entry = this.store.get(id);
-      if (!entry) return `No memory found with id "${id}".`;
+      if (!entry) {
+        log.warn(`handleRead: No memory found with id "${id}".`);
+        return `No memory found with id "${id}".`;
+      }
 
       const tagStr = entry.tags.length > 0 ? ` [${entry.tags.join(', ')}]` : '';
       return `### ${entry.title}${tagStr}\n**Category**: ${entry.category} | **Date**: ${entry.date}\n\n${entry.content}`;
@@ -53,8 +61,13 @@ export class MemoryManager {
   }
 
   async handleSearch(input: unknown): Promise<string> {
+    log.debug(`handleSearch: ${JSON.stringify(input, null, 2)}`);
+
     const { query, category } = input as { query: string; category?: string };
-    if (!query) return 'Error: "query" is required.';
+    if (!query) {
+      log.warn('handleSearch: "query" is required.');
+      return 'Error: "query" is required.';
+    }
 
     try {
       const results = this.store.search(query, {
@@ -76,13 +89,18 @@ export class MemoryManager {
   }
 
   async handleSave(input: unknown): Promise<string> {
+    log.debug(`handleSave: ${JSON.stringify(input, null, 2)}`);
+
     const { topic, content, tags, category } = input as {
       topic: string;
       content: string;
       tags?: string[];
       category?: string;
     };
-    if (!content) return 'Error: "content" is required.';
+    if (!content) {
+      log.warn('handleSave: "content" is required.');
+      return 'Error: "content" is required.';
+    }
 
     try {
       const date = new Date().toISOString().slice(0, 10);
@@ -137,6 +155,8 @@ export class MemoryManager {
   }
 
   async handleList(input: unknown): Promise<string> {
+    log.debug(`handleList: ${JSON.stringify(input, null, 2)}`);
+
     const { category } = (input ?? {}) as { category?: string };
 
     try {
@@ -167,7 +187,7 @@ export class MemoryManager {
     const historyDir = join(workspacesDir, sanitized, '.neoclaw', '.history');
 
     if (!existsSync(historyDir)) {
-      log.debug(`No history directory for "${conversationId}", skipping summarization`);
+      log.warn(`No history directory for "${conversationId}", skipping summarization`);
       return;
     }
 
@@ -177,7 +197,8 @@ export class MemoryManager {
       files = readdirSync(historyDir)
         .filter((f) => f.endsWith('.txt'))
         .sort();
-    } catch {
+    } catch (err) {
+      log.warn(`Error reading history directory for "${conversationId}": ${err}`);
       return;
     }
 
@@ -191,7 +212,8 @@ export class MemoryManager {
       if (existsSync(markerPath)) {
         offsets = JSON.parse(readFileSync(markerPath, 'utf-8'));
       }
-    } catch {
+    } catch (err) {
+      log.warn(`Error reading offset marker for "${conversationId}": ${err}`);
       offsets = {};
     }
 
@@ -212,7 +234,7 @@ export class MemoryManager {
     }
 
     if (newParts.length === 0) {
-      log.debug(`No new history for "${conversationId}", skipping summarization`);
+      log.info(`No new history for "${conversationId}", skipping summarization`);
       return;
     }
 
@@ -221,7 +243,7 @@ export class MemoryManager {
     if (transcript.length < 100) {
       // Still update offsets so we don't re-read this tiny content next time
       writeFileSync(markerPath, JSON.stringify(newOffsets, null, 2), 'utf-8');
-      log.debug(`Transcript too short for "${conversationId}", skipping summarization`);
+      log.info(`Transcript too short for "${conversationId}", skipping summarization`);
       return;
     }
 
@@ -267,7 +289,7 @@ export class MemoryManager {
   // ── Index management ──────────────────────────────────────
 
   reindex(): void {
-    log.info('Rebuilding memory index…');
+    log.info('Rebuilding memory index...');
     this.store.reindex(this.memoryDir);
     const count = this.store.list().length;
     log.info(`Memory index rebuilt: ${count} entries`);
@@ -279,7 +301,7 @@ export class MemoryManager {
     this._reindexTimer = setInterval(() => {
       try {
         this.store.reindex(this.memoryDir);
-        log.debug('Periodic reindex completed');
+        log.info('Periodic reindex completed');
       } catch (err) {
         log.warn(`Periodic reindex failed: ${err}`);
       }

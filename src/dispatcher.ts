@@ -37,8 +37,8 @@ export class Dispatcher {
   /** Per-conversation serial queues to prevent concurrent handling. */
   private _queues = new Map<string, Mutex>();
   private _workspacesDir: string | null = null;
-  private _onRestart: RestartCallback | null = null;
   private _memoryManager: MemoryManager | null = null;
+  private _onRestart: RestartCallback | null = null;
 
   // ── Registration ──────────────────────────────────────────
 
@@ -54,20 +54,24 @@ export class Dispatcher {
 
   setDefaultAgent(kind: string): void {
     this._defaultAgentKind = kind;
+    log.info(`Default agent set: "${kind}"`);
   }
 
   setWorkspacesDir(dir: string): void {
     this._workspacesDir = dir;
-  }
-
-  /** Register a callback for when the /restart command is received. */
-  onRestart(cb: RestartCallback): void {
-    this._onRestart = cb;
+    log.info(`Workspaces base set: "${dir}"`);
   }
 
   /** Inject memory manager for session summarization on /clear and /new. */
   setMemoryManager(mgr: MemoryManager): void {
     this._memoryManager = mgr;
+    log.info('Memory manager set');
+  }
+
+  /** Register a callback for when the /restart command is received. */
+  onRestart(cb: RestartCallback): void {
+    this._onRestart = cb;
+    log.info('Restart callback set');
   }
 
   // ── Handler (passed to gateways) ──────────────────────────
@@ -78,14 +82,18 @@ export class Dispatcher {
     streamHandler?: StreamHandler
   ): Promise<void> => {
     const key = this._conversationKey(msg);
+    log.info(`Handling message for conversation key: ${key}`);
+
     const queue = this._getQueue(key);
     await queue.acquire();
+
     try {
       let responseText = '';
 
       // Slash commands are always non-streaming
       const command = this._tryParseCommand(msg.text);
       if (command) {
+        log.info(`Executing command: ${command}`);
         const response = await this._execCommand(command, msg, key);
         responseText = response.text;
         await reply(response);
@@ -117,6 +125,7 @@ export class Dispatcher {
         }
       }
 
+      log.info(`Response text: "${responseText}"`);
       this._appendHistory(key, 'user', msg.text);
       this._appendHistory(key, 'neoclaw', responseText);
     } finally {
@@ -150,6 +159,9 @@ export class Dispatcher {
       return;
     }
     await gateway.send(chatId, response);
+    log.info(
+      `Message sent to gateway "${gatewayKind}" proactively, chatId="${chatId}" response="${response.text}"`
+    );
   }
 
   // ── Internals ──────────────────────────────────────────────

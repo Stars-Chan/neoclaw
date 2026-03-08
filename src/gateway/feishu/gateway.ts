@@ -72,7 +72,7 @@ export class FeishuGateway implements Gateway {
     }
     this._handler = handler;
 
-    log.info('Starting gateway…');
+    log.info('Starting Feishu gateway...');
     this._startWebSocket();
 
     // start() must not resolve until stop() is called
@@ -82,7 +82,7 @@ export class FeishuGateway implements Gateway {
   async stop(): Promise<void> {
     this._stopped = true;
     this._handler = null;
-    log.info('Gateway stopped');
+    log.info('Feishu gateway stopped');
   }
 
   /** Proactively send a message to a chat (e.g. restart notifications). */
@@ -133,6 +133,7 @@ export class FeishuGateway implements Gateway {
 
     dispatcher.register({
       'im.message.receive_v1': async (data) => {
+        log.debug(`Received message event: ${JSON.stringify(data, null, 2)}`);
         if (this._stopped) return;
         try {
           await this._handleRawMessage(
@@ -185,6 +186,7 @@ export class FeishuGateway implements Gateway {
       botOpenId,
       groupAutoReply: this._config.groupAutoReply,
     });
+    log.debug(`Parsed message: ${JSON.stringify(parsed, null, 2)}`);
     if (!parsed) return;
 
     const msg: InboundMessage = {
@@ -207,9 +209,7 @@ export class FeishuGateway implements Gateway {
       },
     };
 
-    log.info(
-      `Message ${parsed.messageId} from ${parsed.senderName ?? parsed.senderOpenId}: ${parsed.text}`
-    );
+    log.debug(`Parsed inbound message: ${JSON.stringify(msg, null, 2)}`);
 
     // reply() used for slash commands and non-streaming fallback
     const reply: ReplyFn = (response) => this._sendReply(parsed.chatId, response, parsed.messageId);

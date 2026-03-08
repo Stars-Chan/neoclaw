@@ -39,7 +39,6 @@ function loadDedup(): void {
     for (const [id, ts] of entries) {
       if (now - ts < DEDUP_TTL_MS) seenIds.set(id, ts);
     }
-    log.info(`Loaded ${seenIds.size} dedup entries from cache`);
   } catch {
     // Start fresh on parse error
   }
@@ -52,6 +51,7 @@ const flushDedup = createDebouncedFlush(() => {
     writeFileSync(DEDUP_PATH, JSON.stringify([...seenIds.entries()]));
   } catch {
     // Non-critical
+    log.warn('Failed to flush Feishu deduplication cache');
   }
 }, 2000);
 

@@ -55,7 +55,7 @@ export async function summarizeTranscript(transcript: string): Promise<string> {
   const model = getSummaryModel();
   const prompt = SUMMARIZE_PROMPT + transcript;
 
-  const result = Bun.spawnSync(['claude', '--print', '--model', model, '-p', prompt], {
+  const result = Bun.spawnSync(['claude', '--model', model, '-p', prompt], {
     stdout: 'pipe',
     stderr: 'pipe',
     timeout: 60_000,
@@ -63,7 +63,7 @@ export async function summarizeTranscript(transcript: string): Promise<string> {
 
   if (result.exitCode !== 0) {
     const stderr = result.stderr.toString().trim();
-    throw new Error(`claude CLI failed (exit ${result.exitCode}): ${stderr}`);
+    throw new Error(`Claude CLI failed (exit ${result.exitCode}): ${stderr}`);
   }
 
   return result.stdout.toString().trim();

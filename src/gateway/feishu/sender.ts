@@ -135,7 +135,7 @@ export async function sendCard(
   opts?: { replyToMessageId?: string }
 ): Promise<SendResult> {
   const content = JSON.stringify(card);
-  log.info(`Sending card to ${target}: ${content.slice(0, 200)}…`);
+  log.info(`Sending card to ${target}: ${content.slice(0, 200)}...`);
   return sendMessage(client, target, 'interactive', content, opts);
 }
 

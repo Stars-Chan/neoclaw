@@ -510,7 +510,7 @@ export class ClaudeCodeAgent implements Agent {
     // Clear _sessionIds in memory but do NOT flush — the persisted file is kept
     // intact so the next daemon process can resume sessions after a restart.
     this._sessionIds.clear();
-    log.info('Agent disposed');
+    log.info('Claude Code agent disposed');
   }
 
   // ── Session persistence ───────────────────────────────────
@@ -671,7 +671,7 @@ export class ClaudeCodeAgent implements Agent {
     this._scheduleCleanup();
     log.info(
       `Started process for conversation "${conversationId}" (pool size: ${this._pool.size})` +
-        (resumeSessionId ? ` [resuming session ${resumeSessionId.slice(0, 8)}…]` : '')
+        (resumeSessionId ? ` [resuming session ${resumeSessionId.slice(0, 8)}...]` : '')
     );
     return proc;
   }

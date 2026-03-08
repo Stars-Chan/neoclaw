@@ -74,7 +74,7 @@ export class NeoClawDaemon {
         env: { ...process.env, NEOCLAW_DAEMON: '1' },
       });
       child.unref();
-      console.log('[neoclaw] Daemon started in background. Logs:', join(NEOCLAW_HOME, 'logs'));
+      console.log('NeoClaw daemon started in background. Logs:', join(NEOCLAW_HOME, 'logs'));
       process.exit(0);
     }
 
@@ -91,7 +91,7 @@ export class NeoClawDaemon {
     const scheduler = new CronScheduler(dispatcher);
 
     log.info('='.repeat(60));
-    log.info(`NeoClaw daemon starting — pid=${process.pid} agent=${this.config.agent.type}`);
+    log.info(`NeoClaw daemon starting — pid=${process.pid}`);
 
     // Wait a few seconds for gateways to initialize before sending restart notification
     setTimeout(() => this._sendStartupNotification(dispatcher), 5000);
@@ -134,8 +134,10 @@ export class NeoClawDaemon {
   private _removePid(): void {
     try {
       if (existsSync(this._pidPath())) unlinkSync(this._pidPath());
+      log.info(`PID file removed: ${this._pidPath()}`);
     } catch {
       /* ignore */
+      log.warn(`Failed to remove PID file: ${this._pidPath()}`);
     }
   }
 
@@ -175,7 +177,7 @@ export class NeoClawDaemon {
 
     // Gracefully terminate the old daemon
     try {
-      log.info(`Existing daemon found (pid=${oldPid}), sending SIGTERM…`);
+      log.info(`Existing daemon found (pid=${oldPid}), sending SIGTERM...`);
       process.kill(oldPid, 'SIGTERM');
     } catch {
       /* already gone */
@@ -192,7 +194,7 @@ export class NeoClawDaemon {
         this._removePid();
         return;
       }
-      Bun.sleepSync(200);
+      Bun.sleepSync(1000);
     }
 
     try {
@@ -202,7 +204,8 @@ export class NeoClawDaemon {
       /* ignore */
       log.warn(`Failed to send SIGKILL to old daemon (pid=${oldPid})`);
     }
-    Bun.sleepSync(500);
+
+    Bun.sleepSync(1000);
     this._removePid();
   }
 
@@ -210,7 +213,7 @@ export class NeoClawDaemon {
 
   private _registerSignals(): void {
     const shutdown = (sig: string) => {
-      log.info(`Received ${sig}, shutting down…`);
+      log.info(`Received ${sig}, shutting down...`);
       this._abort.abort();
     };
     process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -235,7 +238,7 @@ export class NeoClawDaemon {
     for (const dir of dirs) {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     }
-    log.info(`Workspaces base: ${this.config.workspacesDir}`);
+    log.info(`Needed directories created: ${dirs.join(', ')}`);
   }
 
   // ── Component assembly ────────────────────────────────────
@@ -246,6 +249,7 @@ export class NeoClawDaemon {
     // Build and register the agent
     const agentType = this.config.agent.type;
     if (agentType !== 'claude_code') {
+      log.error(`Unknown agent type: "${agentType}". Currently only "claude_code" is supported.`);
       throw new Error(
         `Unknown agent type: "${agentType}". Currently only "claude_code" is supported.`
       );
@@ -282,7 +286,8 @@ export class NeoClawDaemon {
       const feishu = new FeishuGateway(this.config.feishu);
       dispatcher.addGateway(feishu);
     } else {
-      log.warn('Feishu credentials not configured — gateway not started');
+      log.error('Feishu credentials not configured — gateway not started');
+      throw new Error('Feishu credentials not configured — gateway not started');
     }
 
     // Wire up restart handler
@@ -294,7 +299,7 @@ export class NeoClawDaemon {
   // ── Restart ───────────────────────────────────────────────
 
   private _triggerRestart(info: { chatId: string; gatewayKind: string }): void {
-    log.info('Restart requested — forking new process…');
+    log.info('Restart requested — forking new process...');
 
     // Persist notification context so the new process can inform the user
     this._saveRestartNotify(info);
@@ -319,6 +324,7 @@ export class NeoClawDaemon {
     const dir = dirname(RESTART_NOTIFY_PATH);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(RESTART_NOTIFY_PATH, JSON.stringify(info));
+    log.info(`Restart notify saved: ${RESTART_NOTIFY_PATH}`);
   }
 
   private async _sendStartupNotification(dispatcher: Dispatcher): Promise<void> {
