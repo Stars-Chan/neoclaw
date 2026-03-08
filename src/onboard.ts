@@ -66,7 +66,6 @@ export async function runOnboard(): Promise<void> {
   console.log('  Required fields:');
   console.log('     feishu.appId           — from Feishu Open Platform');
   console.log('     feishu.appSecret        — from Feishu Open Platform');
-  console.log('     feishu.verificationToken — from Event Subscriptions');
   console.log();
   console.log('  2. Make sure Claude Code is installed:');
   console.log('     npm install -g @anthropic-ai/claude-code');
