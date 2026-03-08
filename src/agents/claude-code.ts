@@ -222,7 +222,6 @@ class ClaudeProcess {
       '--output-format',
       'stream-json',
       '--verbose',
-      // '--disallowedTools "CronCreate CronDelete CronList"',
     ];
     if (this.opts.resumeSessionId) args.push('--resume', this.opts.resumeSessionId);
     if (this.opts.model) args.push('--model', this.opts.model);
@@ -231,6 +230,7 @@ class ClaudeProcess {
     } else {
       args.push('--dangerously-skip-permissions');
     }
+    args.push('--disallowedTools', 'CronCreate,CronDelete,CronList');
     const systemPrompt = this.opts.systemPrompt
       ? `${this.opts.systemPrompt}\n\n${ASK_USER_HINT}`
       : ASK_USER_HINT;
