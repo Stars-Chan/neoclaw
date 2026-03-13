@@ -3,13 +3,25 @@
  */
 
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 
 export class FileAccessDenied extends Error {
   constructor(public readonly filePath: string, public readonly reason: string) {
     super(`Access denied to ${filePath}: ${reason}`);
     this.name = 'FileAccessDenied';
   }
+}
+
+/**
+ * Check if a file path is within the workspace directory.
+ */
+export function isPathInWorkspace(filePath: string, workspaceDir: string): boolean {
+  const resolvedPath = resolve(filePath);
+  const resolvedWorkspace = resolve(workspaceDir);
+  // Use platform-specific separator to avoid prefix match issues
+  // e.g., /workspace should not match /workspace2
+  const workspaceWithSep = resolvedWorkspace + sep;
+  return resolvedPath.startsWith(workspaceWithSep) || resolvedPath === resolvedWorkspace;
 }
 
 /**

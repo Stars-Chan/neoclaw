@@ -285,7 +285,11 @@ export class NeoClawDaemon {
     });
 
     // Wrap agent with file blacklist enforcement
-    const wrappedAgent = createFileBlockedAgent(agent, this.config.fileBlacklist ?? []);
+    const wrappedAgent = createFileBlockedAgent(
+      agent,
+      this.config.fileBlacklist ?? [],
+      this.config.workspacesDir
+    );
 
     // Initialize memory system (used for session summarization and periodic reindex)
     const memoryDir = join(NEOCLAW_HOME, 'memory');
